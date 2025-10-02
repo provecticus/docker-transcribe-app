@@ -1,14 +1,78 @@
 <!DOCTYPE html>
 <html>
-<head><title>Upload Audio for Transcription</title></head>
+<head>
+    <title>Upload Audio for Transcription</title>
+    <style>
+        #drop-zone { border: 2px dashed #ccc; padding: 20px; text-align: center; margin: 20px; }
+        #drop-zone.dragover { border-color: #007bff; background: #f8f9fa; }
+        #file-input { display: none; }
+        pre { background: #f8f9fa; padding: 10px; overflow: auto; }
+    </style>
+</head>
 <body>
-    <h1>Upload Audio File to Transcribe</h1>
+    <h1>Upload Audio File to Transcribe (Drag & Drop or Click)</h1>
     {% if error %}<p style="color:red;">{{ error }}</p>{% endif %}
-    <form method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept=".mp3,.wav,.flac,.m4a,.ogg" required>
-        <br><br>
-        <input type="submit" value="Transcribe">
+    
+    <div id="drop-zone">
+        <p>Drag an audio file here (MP3, WAV, FLAC, M4A, OGG) or click to browse.</p>
+        <input type="file" id="file-input" name="file" accept=".mp3,.wav,.flac,.m4a,.ogg" required>
+        <button onclick="document.getElementById('file-input').click()">Browse Files</button>
+    </div>
+    
+    <form id="upload-form" method="post" enctype="multipart/form-data" style="display:none;">
+        <input type="file" name="file" id="hidden-file">
     </form>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const hiddenFile = document.getElementById('hidden-file');
+        const form = document.getElementById('upload-form');
+
+        // Drag events
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                hiddenFile.files = files;
+                form.submit();
+            }
+        }
+
+        fileInput.addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                hiddenFile.files = e.target.files;
+                form.submit();
+            }
+        });
+    </script>
     <p>Access via: http://YOUR_SERVER_IP:5000</p>
 </body>
 </html>
