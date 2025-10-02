@@ -1,26 +1,31 @@
 # Quick Transcription Web App
 
-A minimal, Dockerized web app for uploading audio files (MP3, WAV, etc.) and transcribing them to text using faster-whisper. Built for rapid deployment—upload via browser, get instant text display + TXT download. CPU-optimized for speed (~10-30s per min audio).
+A minimal, Dockerized web app for uploading audio files (MP3, WAV, etc.) and transcribing them to text using faster-whisper. Built for rapid deployment—upload via browser (now with drag-and-drop!), get instant text display + TXT download. CPU-optimized for speed (~10-30s per min audio).
 
 ## Features
-- **Upload & Transcribe**: Supports MP3, WAV, FLAC, M4A, OGG.
-- **Web UI**: Simple form; results show on-page with download.
+- **Upload & Transcribe**: Supports MP3, WAV, FLAC, M4A, OGG. Drag-drop or browse.
+- **Web UI**: Simple, responsive form; results on-page with download.
 - **Dockerized**: Portable, no local deps—runs anywhere with Docker.
-- **Scalable**: Easy to spin up multiple instances (e.g., for load).
+- **Scalable**: Easy multi-instances (e.g., for load balancing).
 
 ## Quick Start (Local Dev)
 1. **Install Docker Desktop**: [Download here](https://www.docker.com/products/docker-desktop/). Restart PC after install.
 2. **Clone & Build**:
+
 git clone <your-repo-url>
 cd transcribe-app
 docker build -t transcribe-app .
-3. **Run**:
+
+**Run**:
+
 docker run -d -p 5000:5000 --name transcribe-1 -v $(pwd)/uploads:/app/uploads transcribe-app
-4. **Access**: `http://localhost:5000`. Upload audio → Transcribe → Download TXT.
+
+4. **Access**: `http://localhost:5000`. Drag an audio file onto the page → Transcribe → Download TXT.
 
 ## Usage
-- Browse to `http://YOUR_IP:5000`.
-- Select file → Submit → View text + "Download TXT".
+- **Drag-Drop**: Drag MP3/etc. directly onto the dashed box—auto-uploads and transcribes.
+- **Fallback**: Click "Browse Files" for traditional select.
+- **Results**: Text displays with detected language; "Download TXT" link saves full transcript.
 - Logs: `docker logs transcribe-1 -f`.
 
 ## Scaling/Instances
@@ -31,6 +36,7 @@ docker run -d -p 5000:5000 --name transcribe-1 -v $(pwd)/uploads:/app/uploads tr
 ## Build History & Fixes
 - **v1.0 (Oct 02, 2025)**: Initial Flask + faster-whisper on Python 3.11 (switched from 3.13 due to PyAV wheel issues).
 - **Docker Tweaks**: Fixed COPY syntax (separate `COPY app.py ./` + `COPY templates/ ./templates/`) to avoid mis-placement.
+- **v1.1**: Added HTML5 drag-drop (vanilla JS; no deps). Multi-stage Dockerfile for slimmer images.
 - **Model**: "base.en" for speed; edit `app.py` to "small.en" for accuracy (slower).
 - **First Run**: Downloads ~150MB model—needs internet.
 
@@ -40,14 +46,45 @@ docker run -d -p 5000:5000 --name transcribe-1 -v $(pwd)/uploads:/app/uploads tr
 - **Slow Transcribe**: CPU-bound; add GPU later (`device="cuda"` in app.py + NVIDIA Docker).
 - **Firewall**: Allow TCP 5000 inbound.
 - **Logs Empty**: `docker logs transcribe-1` (model load takes 1-2 min first time).
+- **Drag-Drop Not Working**: Check browser console (F12); ensure HTTPS for production (drag API quirk).
 
-## Deployment (Server)
-See DEPLOYMENT.md for full guide.
+## Deployment
+See [DEPLOYMENT.md](DEPLOYMENT.md) for server options (AWS, DigitalOcean, Windows).
 
 ## Next Steps
-- Drag-drop UI (in progress).
 - Folder monitoring (watchdog lib).
 - Auth (Flask-Login).
 - Integrate with KWVE repo (MinIO polling).
 
 License: MIT. Built by Grok (xAI) + your team.
+=== README.md END ===
+
+=== DEPLOYMENT.md START ===
+# Deployment Guide: Quick Transcription Web App
+
+This guide covers deploying the app to a live server for team access. All options use Docker for consistency. Costs are ~$3-5/mo for basics. Share the URL (e.g., `http://YOUR_IP`) via email/Slack.
+
+## Prerequisites (All Options)
+- Docker installed on target machine.
+- Git repo cloned: `git clone <your-repo> && cd transcribe-app`.
+- Firewall: Open port 80/5000 (TCP inbound).
+- Domain (optional): Use free dynamic DNS (e.g., No-IP) for static URL.
+
+## Option 1: Local Windows Machine (Dev/Testing—Free, 5 Min)
+For quick team shares on your network.
+1. **Install Docker Desktop**: [Download](https://www.docker.com/products/docker-desktop/). Restart.
+2. **Build & Run**:
+
+docker build -t transcribe-app .
+docker run -d -p 80:5000 --restart=always --name transcribe-1 -v $(pwd)/uploads:/app/uploads transcribe-app
+
+3. **Access**: `http://YOUR_LOCAL_IP` (find IP: `ipconfig` > IPv4).
+4. **Pros/Cons**: Free, but machine must stay on. Pros: No cloud setup.
+5. **Firewall**: Windows Defender > Inbound Rules > New > Port 80 TCP > Allow.
+6. **Backup**: `docker commit transcribe-1 transcribe-backup:v1` (saves image).
+
+## Option 2: AWS Lightsail (Recommended—$3.50/mo, 10 Min)
+Scalable VPS; free tier for first month.
+1. **Create Instance**:
+- [lightsail.aws.amazon.com](https://lightsail.aws.amazon.com/) > Sign in (free account).
+- "Create instance" > Platform: Linux/Unix > Blueprint: Amazon Linux 2023 > Instance
