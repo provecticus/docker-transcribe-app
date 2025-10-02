@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<head><title>Transcription Result</title></head>
+<body>
+    <h1>Transcription Complete!</h1>
+    <p><strong>Detected Language:</strong> {{ lang }}</p>
+    <h3>Text:</h3>
+    <pre>{{ text }}</pre>
+    <a href="{{ url_for('download') }}">Download TXT</a> | 
+    <a href="{{ url_for('index') }}">Upload Another</a>
+</body>
+</html>

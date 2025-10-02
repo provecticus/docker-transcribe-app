@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head><title>Upload Audio for Transcription</title></head>
+<body>
+    <h1>Upload Audio File to Transcribe</h1>
+    {% if error %}<p style="color:red;">{{ error }}</p>{% endif %}
+    <form method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".mp3,.wav,.flac,.m4a,.ogg" required>
+        <br><br>
+        <input type="submit" value="Transcribe">
+    </form>
+    <p>Access via: http://YOUR_SERVER_IP:5000</p>
+</body>
+</html>
