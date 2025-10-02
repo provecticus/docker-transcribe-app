@@ -1,78 +1,241 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Upload Audio for Transcription</title>
-    <style>
-        #drop-zone { border: 2px dashed #ccc; padding: 20px; text-align: center; margin: 20px; }
-        #drop-zone.dragover { border-color: #007bff; background: #f8f9fa; }
-        #file-input { display: none; }
-        pre { background: #f8f9fa; padding: 10px; overflow: auto; }
-    </style>
+  <meta charset="utf-8" />
+  <title>Upload Audio for Transcription</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --surface: #12161c;
+      --card: #171c22;
+      --text: #e6ecf2;
+      --muted: #a8b3bf;
+      --primary: #4ea3ff;
+      --primary-ink: #06121f;
+      --outline: #29323b;
+      --good: #30d158;
+      --warn: #ffb020;
+      --danger: #ff5a5f;
+      --radius: 14px;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --focus: 0 0 0 3px rgba(78,163,255,.35);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      color: var(--text);
+      background:
+        radial-gradient(1200px 800px at -10% -20%, #142132 0%, transparent 60%),
+        radial-gradient(900px 600px at 120% 10%, #182437 0%, transparent 60%),
+        var(--bg);
+    }
+
+    .container {
+      max-width: 900px;
+      margin: clamp(24px, 5vh, 48px) auto;
+      padding: 0 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--outline);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: clamp(18px, 3vw, 28px);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-weight: 650;
+      letter-spacing: .2px;
+    }
+    p.subtle { color: var(--muted); margin-top: 0; }
+
+    .alert {
+      background: rgba(255,90,95,.1);
+      border: 1px solid rgba(255,90,95,.35);
+      color: #ffd6d7;
+      padding: 10px 12px;
+      border-radius: 10px;
+      margin: 12px 0 16px;
+    }
+
+    /* Dropzone */
+    #drop-zone {
+      display: grid;
+      gap: 10px;
+      align-content: center;
+      justify-items: center;
+      border: 2px dashed #395166;
+      border-radius: calc(var(--radius) - 2px);
+      padding: clamp(28px, 8vh, 60px);
+      text-align: center;
+      transition: border-color .2s ease, background-color .2s ease, transform .15s ease;
+      background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.00));
+    }
+    #drop-zone:hover { transform: translateY(-1px); }
+    #drop-zone.dragover {
+      border-color: var(--primary);
+      background: rgba(78,163,255,.06);
+      box-shadow: var(--focus);
+    }
+    #file-input { display: none; }
+    .hint { color: var(--muted); font-size: .95rem; }
+
+    /* Buttons (anchor or button) */
+    .actions { display: flex; gap: 12px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+    .btn, a.btn {
+      appearance: none;
+      border: 1px solid var(--outline);
+      background: var(--surface);
+      color: var(--text);
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: transform .06s ease, background .2s ease, border-color .2s ease, opacity .2s ease;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:focus-visible { outline: none; box-shadow: var(--focus); }
+    .btn-primary {
+      background: linear-gradient(180deg, #5db1ff, #4699f2);
+      border-color: #3f85cf;
+      color: var(--primary-ink);
+    }
+    .btn-ghost { background: transparent; }
+
+    .footer {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: .95rem;
+    }
+    .footer a { color: var(--text); }
+
+    /* Overlay shown during auto-submit */
+    .overlay {
+      position: fixed; inset: 0; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,.35); backdrop-filter: blur(2px);
+      z-index: 99;
+    }
+    .overlay.on { display: flex; }
+    .spinner {
+      width: 42px; height: 42px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,.25);
+      border-top-color: var(--primary);
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg) } }
+
+    /* Respect dark/light preference automatically */
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f5f7fb;
+        --surface: #ffffff;
+        --card: #ffffff;
+        --text: #102030;
+        --muted: #5c6773;
+        --primary: #1769ff;
+        --primary-ink: #ffffff;
+        --outline: #d9e0e7;
+      }
+      .alert { color: #6b0002; background: #ffe6e7; border-color: #ffc7c9; }
+      #drop-zone { border-color: #c1c8d0; }
+    }
+  </style>
 </head>
 <body>
-    <h1>Upload Audio File to Transcribe (Drag & Drop or Click)</h1>
-    {% if error %}<p style="color:red;">{{ error }}</p>{% endif %}
-    
-    <div id="drop-zone">
-        <p>Drag an audio file here (MP3, WAV, FLAC, M4A, OGG) or click to browse.</p>
-        <input type="file" id="file-input" name="file" accept=".mp3,.wav,.flac,.m4a,.ogg" required>
-        <button onclick="document.getElementById('file-input').click()">Browse Files</button>
+  <div class="container">
+    <div class="card">
+      <h1>Upload audio to transcribe</h1>
+      <p class="subtle">Drag &amp; drop your file below or click <strong>Choose file</strong>. Supported: MP3, WAV, FLAC, M4A, OGG.</p>
+
+      {% if error %}
+        <div class="alert" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <!-- Drop zone -->
+      <div id="drop-zone" role="button" tabindex="0" aria-label="File dropzone (click to choose)">
+        <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="currentColor" d="M12 3a5 5 0 0 1 5 5v1h1a3 3 0 0 1 0 6h-2v-2h2a1 1 0 0 0 0-2h-3V8a3 3 0 0 0-6 0v4H6a1 1 0 0 0 0 2h2v2H6a3 3 0 0 1 0-6h1V8a5 5 0 0 1 5-5Zm-1 8h2v6h3l-4 4l-4-4h3v-6Z"/>
+        </svg>
+        <div>
+          <div><strong>Drop file here</strong></div>
+          <div class="hint">or</div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" id="browse-btn" type="button" aria-controls="file-input">Choose file</button>
+          <a class="btn btn-ghost" id="access-link" href="#" target="_blank" rel="noopener">http://…:5000</a>
+        </div>
+        <div class="hint">Max size depends on server settings.</div>
+        <input type="file" id="file-input" name="file" accept=".mp3,.wav,.flac,.m4a,.ogg" required />
+      </div>
+
+      <!-- Hidden form (auto-submitted when a file arrives) -->
+      <form id="upload-form" method="post" enctype="multipart/form-data" style="display:none;">
+        <input type="file" name="file" id="hidden-file" />
+      </form>
+
+      <div class="footer">
+        Tip: you can bookmark the access link above and share it on your LAN.
+      </div>
     </div>
-    
-    <form id="upload-form" method="post" enctype="multipart/form-data" style="display:none;">
-        <input type="file" name="file" id="hidden-file">
-    </form>
+  </div>
 
-    <script>
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('file-input');
-        const hiddenFile = document.getElementById('hidden-file');
-        const form = document.getElementById('upload-form');
+  <!-- Upload overlay -->
+  <div id="overlay" class="overlay" aria-hidden="true" aria-live="polite">
+    <div class="spinner" aria-label="Uploading…"></div>
+  </div>
 
-        // Drag events
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, preventDefaults, false);
-        });
+  <script>
+    const dropZone   = document.getElementById('drop-zone');
+    const fileInput  = document.getElementById('file-input');
+    const hiddenFile = document.getElementById('hidden-file');
+    const form       = document.getElementById('upload-form');
+    const overlay    = document.getElementById('overlay');
 
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
+    // --- Auto-build the access link from current host/IP and port 5000
+    (function setAccessLink() {
+      const a = document.getElementById('access-link');
+      const host = window.location.hostname || 'localhost';
+      const link = `http://${host}:5000`;
+      a.href = link;
+      a.textContent = link;
+    })();
 
-        ['dragenter', 'dragover'].forEach(eventName => {
-            dropZone.addEventListener(eventName, highlight, false);
-        });
+    // --- Drag & drop helpers
+    const prevent = e => { e.preventDefault(); e.stopPropagation(); };
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
+      dropZone.addEventListener(evt, prevent, false);
+    });
+    ['dragenter', 'dragover'].forEach(evt => {
+      dropZone.addEventListener(evt, () => dropZone.classList.add('dragover'), false);
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+      dropZone.addEventListener(evt, () => dropZone.classList.remove('dragover'), false);
+    });
 
-        ['dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, unhighlight, false);
-        });
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+    });
 
-        function highlight(e) {
-            dropZone.classList.add('dragover');
-        }
+    function submitWith(files) {
+      if (!files || !files.length) return;
+      hiddenFile.files = files;
+      overlay.classList.add('on');
+      overlay.setAttribute('aria-hidden', 'false');
+      form.submit();
+    }
 
-        function unhighlight(e) {
-            dropZone.classList.remove('dragover');
-        }
-
-        dropZone.addEventListener('drop', handleDrop, false);
-
-        function handleDrop(e) {
-            const dt = e.dataTransfer;
-            const files = dt.files;
-            if (files.length > 0) {
-                hiddenFile.files = files;
-                form.submit();
-            }
-        }
-
-        fileInput.addEventListener('change', function(e) {
-            if (e.target.files.length > 0) {
-                hiddenFile.files = e.target.files;
-                form.submit();
-            }
-        });
-    </script>
-    <p>Access via: http://YOUR_SERVER_IP:5000</p>
+    dropZone.addEventListener('drop', e => submitWith(e.dataTransfer.files), false);
+    document.getElementById('browse-btn').addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', e => submitWith(e.target.files));
+  </script>
 </body>
 </html>
