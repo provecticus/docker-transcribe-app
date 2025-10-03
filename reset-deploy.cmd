@@ -12,7 +12,7 @@ REM --- Config (edit if needed) ---
 set "CONTAINER_NAME=transcribe-1"
 set "IMAGE_NAME=transcribe-app"
 set "PORT=5000"
-set "VOLUMES=-v "%CD%\uploads:/app/uploads""
+set "VOLUMES=-v "%CD%\Uploads:/app/uploads" -e KEEP_UPLOADS=true"
 
 echo [STEP] Stopping/removing old container (%CONTAINER_NAME%)...
 docker stop %CONTAINER_NAME% 2>nul || echo [INFO] No running container.

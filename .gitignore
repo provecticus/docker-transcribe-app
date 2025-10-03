@@ -3,3 +3,7 @@ __pycache__/
 uploads/
 .DS_Store
 *.pyc
+config.json
+Uploads/
+download_vad.py
+test_vad_download.py

@@ -88,3 +88,6 @@ Scalable VPS; free tier for first month.
 1. **Create Instance**:
 - [lightsail.aws.amazon.com](https://lightsail.aws.amazon.com/) > Sign in (free account).
 - "Create instance" > Platform: Linux/Unix > Blueprint: Amazon Linux 2023 > Instance
+
+## Upgrades/Resets
+- Use `reset-deploy.cmd` (Windows): Stops old, pulls Git, rebuilds, restarts. Run from project root.
