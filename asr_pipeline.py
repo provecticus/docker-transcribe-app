@@ -19,7 +19,7 @@ def fmt_clock(seconds: float | None) -> str:
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
 
-def transcribe_with_speakers(audio_path: str, model_name: str = "base.en", device: str | None = None):
+def transcribe_with_speakers(audio_path: str, model_name: str = "small.en", device: str | None = None):
     """
     Transcribe and diarize audio using WhisperX + pyannote.
     Returns:
@@ -48,6 +48,12 @@ def transcribe_with_speakers(audio_path: str, model_name: str = "base.en", devic
         print("Successfully logged in to Hugging Face")
     except Exception as e:
         raise RuntimeError(f"Failed to authenticate with Hugging Face: {str(e)}")
+
+    # Clear VAD cache to fix checksum mismatch
+    vad_cache_path = "/root/.cache/torch/whisperx-vad-segmentation.bin"
+    if os.path.exists(vad_cache_path):
+        print("Clearing VAD cache to fix checksum mismatch")
+        os.remove(vad_cache_path)
 
     # Ensure VAD model is available
     vad_model_path = "/root/.cache/whisperx-vad/silero_vad.onnx"
