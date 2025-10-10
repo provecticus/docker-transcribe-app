@@ -4,7 +4,8 @@ from pathlib import Path
 from flask import Flask, request, render_template, send_file, abort, url_for
 
 from faster_whisper import WhisperModel
-from pyannote.audio import Pipeline, load_audio
+from pyannote.audio import Pipeline
+from pyannote.audio.core.audio import load_audio  # Correct import for load_audio
 from pyannote.core import Segment
 import torch
 
