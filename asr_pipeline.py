@@ -19,7 +19,7 @@ def fmt_clock(seconds: float | None) -> str:
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
 
-def transcribe_with_speakers(audio_path: str, model_name: str = "small.en", device: str | None = None):
+def transcribe_with_speakers(audio_path: str, model_name: str = "base.en", device: str | None = None):
     """
     Transcribe and diarize audio using WhisperX + pyannote.
     Returns:
@@ -55,7 +55,7 @@ def transcribe_with_speakers(audio_path: str, model_name: str = "small.en", devi
         try:
             print("Downloading silero VAD model")
             os.makedirs("/root/.cache/whisperx-vad", exist_ok=True)
-            downloaded_file = hf_hub_download(repo_id="onnx-community/silero-vad", filename="onnx/model_fp16.onnx", local_dir="/root/.cache/whisperx-vad", token=hf_token)
+            downloaded_file = hf_hub_download(repo_id="onnx-community/silero-vad", filename="onnx/model_int8.onnx", local_dir="/root/.cache/whisperx-vad", token=hf_token)
             shutil.move(downloaded_file, vad_model_path)
         except Exception as e:
             raise RuntimeError(f"Failed to download VAD model: {str(e)}")
