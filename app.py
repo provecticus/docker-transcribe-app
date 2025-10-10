@@ -3,17 +3,38 @@ import json
 from pathlib import Path
 from flask import Flask, request, render_template, send_file, abort, url_for
 
-from asr_pipeline import transcribe_with_speakers, to_srt, to_vtt
+from faster_whisper import WhisperModel
+from pyannote.audio import Pipeline
+from pyannote.core import Segment
+import torch
 
 APP_DIR = Path(__file__).parent.resolve()
-UPLOAD_DIR = APP_DIR / "Uploads"
+UPLOAD_DIR = APP_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_DIR)
 
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small.en")
 KEEP_UPLOADS = os.environ.get("KEEP_UPLOADS", "false").lower() == "true"
+
+# Load models once at startup
+model = WhisperModel("base.en", device="cpu", compute_type="int8")
+pipeline = Pipeline.from_pretrained(
+    "pyannote/speaker-diarization-3.1",
+    use_auth_token=os.getenv("HUGGINGFACE_HUB_TOKEN")
+)
+if torch.cuda.is_available():
+    pipeline.to(torch.device("cuda"))
+
+def overlaps(segment_a, segment_b, threshold=0.5):
+    """Check temporal overlap between segments."""
+    start_a, end_a = segment_a.start, segment_a.end
+    start_b, end_b = segment_b.start, segment_b.end
+    overlap_start = max(start_a, start_b)
+    overlap_end = min(end_a, end_b)
+    overlap_duration = max(0, overlap_end - overlap_start)
+    min_duration = min(end_a - start_a, end_b - start_b)
+    return (overlap_duration / min_duration) > threshold if min_duration > 0 else False
 
 def cleanup_uploads(exclude_files=None):
     """Delete old files in UPLOAD_DIR, excluding specified files."""
@@ -45,29 +66,58 @@ def index():
         f.save(tmp_path)
 
         try:
-            res = transcribe_with_speakers(str(tmp_path), model_name=WHISPER_MODEL)
-            segments = res["segments"]
-            lang = res["language"]
+            # Transcribe with timestamps
+            segments, info = model.transcribe(str(tmp_path), beam_size=5)
+            lang = info.language
 
+            # Diarization
+            diarization = pipeline(str(tmp_path))
+
+            # Align speakers to segments
+            formatted_segments = []
+            for segment in segments:
+                best_speaker = None
+                max_overlap = 0
+                for turn, _, speaker in diarization.itertracks(yield_label=True):
+                    turn_segment = Segment(turn.start, turn.end)
+                    overlap_ratio = overlaps(segment, turn_segment)
+                    if overlap_ratio > max_overlap:
+                        max_overlap = overlap_ratio
+                        best_speaker = speaker
+                # Format timestamp as MM:SS
+                start_min, start_sec = divmod(int(segment.start), 60)
+                end_min, end_sec = divmod(int(segment.end), 60)
+                timestamp = f"[{start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d}]"
+                speaker_label = f"SPEAKER_{best_speaker}" if best_speaker else "UNKNOWN"
+                formatted_segments.append({
+                    "start": segment.start,
+                    "end": segment.end,
+                    "speaker": speaker_label,
+                    "text": segment.text.strip()
+                })
+
+            # Generate outputs
             base = "transcription"
             json_path = UPLOAD_DIR / f"{base}.json"
             srt_path = UPLOAD_DIR / f"{base}.srt"
             vtt_path = UPLOAD_DIR / f"{base}.vtt"
             txt_path = UPLOAD_DIR / f"{base}.txt"
 
-            json_path.write_text(json.dumps({"language": lang, "segments": segments}, ensure_ascii=False, indent=2), encoding="utf-8")
-            srt_path.write_text(to_srt(segments), encoding="utf-8")
-            vtt_path.write_text(to_vtt(segments), encoding="utf-8")
+            json_path.write_text(json.dumps({"language": lang, "segments": formatted_segments}, ensure_ascii=False, indent=2), encoding="utf-8")
 
             # Human-readable TXT
             lines = []
-            for seg in segments:
+            for seg in formatted_segments:
                 mm_start = int(seg["start"] // 60)
                 ss_start = int(seg["start"] % 60)
                 mm_end = int(seg["end"] // 60)
                 ss_end = int(seg["end"] % 60)
                 lines.append(f"[{mm_start:02d}:{ss_start:02d} - {mm_end:02d}:{ss_end:02d}] {seg['speaker']}: {seg['text']}")
             txt_path.write_text("\n".join(lines), encoding="utf-8")
+
+            # SRT/VTT (simplified)
+            srt_path.write_text(to_srt(formatted_segments), encoding="utf-8")
+            vtt_path.write_text(to_vtt(formatted_segments), encoding="utf-8")
 
             # Keep audio file and generate URL
             audio_url = url_for('serve_audio', filename=f"upload{suffix}") if KEEP_UPLOADS else None
@@ -82,7 +132,7 @@ def index():
             return render_template(
                 "result.html",
                 lang=lang,
-                segments=segments,
+                segments=formatted_segments,
                 files={
                     "txt": url_for('download_file', kind='txt'),
                     "json": url_for('download_file', kind='json'),
@@ -101,6 +151,23 @@ def index():
             return render_template("index.html", error=f"Transcription failed: {str(e)}")
 
     return render_template("index.html")
+
+def to_srt(segments):
+    lines = []
+    for i, seg in enumerate(segments, 1):
+        lines.append(str(i))
+        lines.append(f"{seg['start']:.3f} --> {seg['end']:.3f}")
+        lines.append(f"{seg['speaker']}: {seg['text']}")
+        lines.append("")
+    return "\n".join(lines)
+
+def to_vtt(segments):
+    lines = ["WEBVTT", ""]
+    for seg in segments:
+        lines.append(f"{seg['start']:.3f} --> {seg['end']:.3f}")
+        lines.append(f"{seg['speaker']}: {seg['text']}")
+        lines.append("")
+    return "\n".join(lines)
 
 @app.route("/download/<kind>")
 def download_file(kind: str):
