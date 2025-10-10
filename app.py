@@ -17,14 +17,25 @@ app.config["UPLOAD_FOLDER"] = str(UPLOAD_DIR)
 
 KEEP_UPLOADS = os.environ.get("KEEP_UPLOADS", "false").lower() == "true"
 
+# Load token from config.json
+config_path = os.path.join(APP_DIR, "config.json")
+with open(config_path, "r") as f:
+    config = json.load(f)
+HF_TOKEN = config.get("HUGGINGFACE_HUB_TOKEN", "").strip()
+
 # Load models once at startup
 model = WhisperModel("base.en", device="cpu", compute_type="int8")
-pipeline = Pipeline.from_pretrained(
-    "pyannote/speaker-diarization-3.1",
-    use_auth_token=os.getenv("HUGGINGFACE_HUB_TOKEN")
-)
-if torch.cuda.is_available():
-    pipeline.to(torch.device("cuda"))
+try:
+    pipeline = Pipeline.from_pretrained(
+        "pyannote/speaker-diarization-3.1",
+        use_auth_token=HF_TOKEN
+    )
+    if torch.cuda.is_available():
+        pipeline.to(torch.device("cuda"))
+    print("Pyannote pipeline loaded successfully")
+except Exception as e:
+    print(f"Failed to load pyannote pipeline: {e}")
+    pipeline = None
 
 def overlaps(segment_a, segment_b, threshold=0.5):
     """Check temporal overlap between segments."""
@@ -70,31 +81,44 @@ def index():
             segments, info = model.transcribe(str(tmp_path), beam_size=5)
             lang = info.language
 
-            # Diarization
-            diarization = pipeline(str(tmp_path))
-
-            # Align speakers to segments
-            formatted_segments = []
-            for segment in segments:
-                best_speaker = None
-                max_overlap = 0
-                for turn, _, speaker in diarization.itertracks(yield_label=True):
-                    turn_segment = Segment(turn.start, turn.end)
-                    overlap_ratio = overlaps(segment, turn_segment)
-                    if overlap_ratio > max_overlap:
-                        max_overlap = overlap_ratio
-                        best_speaker = speaker
-                # Format timestamp as MM:SS
-                start_min, start_sec = divmod(int(segment.start), 60)
-                end_min, end_sec = divmod(int(segment.end), 60)
-                timestamp = f"[{start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d}]"
-                speaker_label = f"SPEAKER_{best_speaker}" if best_speaker else "UNKNOWN"
-                formatted_segments.append({
-                    "start": segment.start,
-                    "end": segment.end,
-                    "speaker": speaker_label,
-                    "text": segment.text.strip()
-                })
+            # Diarization (if pipeline loaded)
+            if pipeline:
+                diarization = pipeline(str(tmp_path))
+                # Align speakers to segments
+                formatted_segments = []
+                for segment in segments:
+                    best_speaker = None
+                    max_overlap = 0
+                    for turn, _, speaker in diarization.itertracks(yield_label=True):
+                        turn_segment = Segment(turn.start, turn.end)
+                        overlap_ratio = overlaps(segment, turn_segment)
+                        if overlap_ratio > max_overlap:
+                            max_overlap = overlap_ratio
+                            best_speaker = speaker
+                    # Format timestamp as MM:SS
+                    start_min, start_sec = divmod(int(segment.start), 60)
+                    end_min, end_sec = divmod(int(segment.end), 60)
+                    timestamp = f"[{start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d}]"
+                    speaker_label = f"SPEAKER_{best_speaker}" if best_speaker else "UNKNOWN"
+                    formatted_segments.append({
+                        "start": segment.start,
+                        "end": segment.end,
+                        "speaker": speaker_label,
+                        "text": segment.text.strip()
+                    })
+            else:
+                # Fallback without diarization
+                formatted_segments = []
+                for segment in segments:
+                    start_min, start_sec = divmod(int(segment.start), 60)
+                    end_min, end_sec = divmod(int(segment.end), 60)
+                    timestamp = f"[{start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d}]"
+                    formatted_segments.append({
+                        "start": segment.start,
+                        "end": segment.end,
+                        "speaker": "UNKNOWN",
+                        "text": segment.text.strip()
+                    })
 
             # Generate outputs
             base = "transcription"
