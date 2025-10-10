@@ -4,7 +4,7 @@ from pathlib import Path
 from flask import Flask, request, render_template, send_file, abort, url_for
 
 from faster_whisper import WhisperModel
-from pyannote.audio import Pipeline
+from pyannote.audio import Pipeline, load_audio
 from pyannote.core import Segment
 import torch
 
@@ -83,7 +83,9 @@ def index():
 
             # Diarization (if pipeline loaded)
             if pipeline:
-                diarization = pipeline(str(tmp_path))
+                # Load audio as seekable waveform
+                waveform, sample_rate = load_audio(str(tmp_path))
+                diarization = pipeline({"waveform": waveform, "sample_rate": sample_rate})
                 # Align speakers to segments
                 formatted_segments = []
                 for segment in segments:
