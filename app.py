@@ -1,13 +1,15 @@
 import os
 import json
+import threading
+import time
 from pathlib import Path
-from flask import Flask, request, render_template, send_file, abort, url_for
+from flask import Flask, request, render_template, send_file, abort, url_for, jsonify
 
 from faster_whisper import WhisperModel
 from pyannote.audio import Pipeline
-import torchaudio  # Correct import for load (torchaudio backend)
 from pyannote.core import Segment
 import torch
+import uuid
 
 APP_DIR = Path(__file__).parent.resolve()
 UPLOAD_DIR = APP_DIR / "uploads"
@@ -37,6 +39,9 @@ try:
 except Exception as e:
     print(f"Failed to load pyannote pipeline: {e}")
     pipeline = None
+
+# Global dict for task status (simple in-memory; use Redis for production)
+tasks = {}
 
 def overlaps(segment_a, segment_b, threshold=0.5):
     """Check temporal overlap between segments."""
@@ -77,107 +82,100 @@ def index():
         tmp_path = UPLOAD_DIR / f"upload{suffix}"
         f.save(tmp_path)
 
-        try:
-            # Transcribe with timestamps
-            segments, info = model.transcribe(str(tmp_path), beam_size=5)
-            lang = info.language
+        # Create task ID
+        task_id = str(uuid.uuid4())
+        tasks[task_id] = {
+            "status": "received",
+            "message": "File received, starting transcription...",
+            "segments": None
+        }
 
-            # Diarization (if pipeline loaded)
-            if pipeline:
-                # Load audio as seekable waveform
-                waveform, sample_rate = torchaudio.load(str(tmp_path))
-                diarization = pipeline({"waveform": waveform, "sample_rate": sample_rate})
-                # Align speakers to segments
-                formatted_segments = []
-                for segment in segments:
-                    best_speaker = None
-                    max_overlap = 0
-                    for turn, _, speaker in diarization.itertracks(yield_label=True):
-                        turn_segment = Segment(turn.start, turn.end)
-                        overlap_ratio = overlaps(segment, turn_segment)
-                        if overlap_ratio > max_overlap:
-                            max_overlap = overlap_ratio
-                            best_speaker = speaker
-                    # Format timestamp as MM:SS
-                    start_min, start_sec = divmod(int(segment.start), 60)
-                    end_min, end_sec = divmod(int(segment.end), 60)
-                    timestamp = f"[{start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d}]"
-                    speaker_label = f"SPEAKER_{best_speaker}" if best_speaker else "UNKNOWN"
-                    formatted_segments.append({
-                        "start": segment.start,
-                        "end": segment.end,
-                        "speaker": speaker_label,
-                        "text": segment.text.strip()
-                    })
-            else:
-                # Fallback without diarization
-                formatted_segments = []
-                for segment in segments:
-                    start_min, start_sec = divmod(int(segment.start), 60)
-                    end_min, end_sec = divmod(int(segment.end), 60)
-                    timestamp = f"[{start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d}]"
-                    formatted_segments.append({
-                        "start": segment.start,
-                        "end": segment.end,
-                        "speaker": "UNKNOWN",
-                        "text": segment.text.strip()
-                    })
+        # Start background processing
+        threading.Thread(target=process_audio, args=(task_id, str(tmp_path))).start()
 
-            # Generate outputs
-            base = "transcription"
-            json_path = UPLOAD_DIR / f"{base}.json"
-            srt_path = UPLOAD_DIR / f"{base}.srt"
-            vtt_path = UPLOAD_DIR / f"{base}.vtt"
-            txt_path = UPLOAD_DIR / f"{base}.txt"
-
-            json_path.write_text(json.dumps({"language": lang, "segments": formatted_segments}, ensure_ascii=False, indent=2), encoding="utf-8")
-
-            # Human-readable TXT
-            lines = []
-            for seg in formatted_segments:
-                mm_start = int(seg["start"] // 60)
-                ss_start = int(seg["start"] % 60)
-                mm_end = int(seg["end"] // 60)
-                ss_end = int(seg["end"] % 60)
-                lines.append(f"[{mm_start:02d}:{ss_start:02d} - {mm_end:02d}:{ss_end:02d}] {seg['speaker']}: {seg['text']}")
-            txt_path.write_text("\n".join(lines), encoding="utf-8")
-
-            # SRT/VTT (simplified)
-            srt_path.write_text(to_srt(formatted_segments), encoding="utf-8")
-            vtt_path.write_text(to_vtt(formatted_segments), encoding="utf-8")
-
-            # Keep audio file and generate URL
-            audio_url = url_for('serve_audio', filename=f"upload{suffix}") if KEEP_UPLOADS else None
-
-            # Delete original upload (if not keeping)
-            if not KEEP_UPLOADS:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-            return render_template(
-                "result.html",
-                lang=lang,
-                segments=formatted_segments,
-                files={
-                    "txt": url_for('download_file', kind='txt'),
-                    "json": url_for('download_file', kind='json'),
-                    "srt": url_for('download_file', kind='srt'),
-                    "vtt": url_for('download_file', kind='vtt'),
-                },
-                audio_url=audio_url
-            )
-
-        except Exception as e:
-            if not KEEP_UPLOADS:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-            return render_template("index.html", error=f"Transcription failed: {str(e)}")
+        return render_template("index.html", task_id=task_id, status="processing")
 
     return render_template("index.html")
+
+def process_audio(task_id, tmp_path):
+    try:
+        tasks[task_id]["status"] = "transcribing"
+        tasks[task_id]["message"] = "Transcribing audio..."
+        # Transcribe with timestamps
+        segments, info = model.transcribe(tmp_path, beam_size=5)
+        lang = info.language
+        tasks[task_id]["status"] = "diarizing"
+        tasks[task_id]["message"] = "Identifying speakers..."
+        # Diarization (if pipeline loaded)
+        if pipeline:
+            waveform, sample_rate = torchaudio.load(tmp_path)
+            diarization = pipeline({"waveform": waveform, "sample_rate": sample_rate})
+            # Align speakers to segments
+            formatted_segments = []
+            for segment in segments:
+                best_speaker = None
+                max_overlap = 0
+                for turn, _, speaker in diarization.itertracks(yield_label=True):
+                    turn_segment = Segment(turn.start, turn.end)
+                    overlap_ratio = overlaps(segment, turn_segment)
+                    if overlap_ratio > max_overlap:
+                        max_overlap = overlap_ratio
+                        best_speaker = speaker
+                # Format timestamp as MM:SS
+                start_min, start_sec = divmod(int(segment.start), 60)
+                end_min, end_sec = divmod(int(segment.end), 60)
+                timestamp = f"[{start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d}]"
+                speaker_label = f"SPEAKER_{best_speaker}" if best_speaker else "UNKNOWN"
+                formatted_segments.append({
+                    "start": segment.start,
+                    "end": segment.end,
+                    "speaker": speaker_label,
+                    "text": segment.text.strip()
+                })
+        else:
+            # Fallback without diarization
+            formatted_segments = []
+            for segment in segments:
+                start_min, start_sec = divmod(int(segment.start), 60)
+                end_min, end_sec = divmod(int(segment.end), 60)
+                timestamp = f"[{start_min:02d}:{start_sec:02d} - {end_min:02d}:{end_sec:02d}]"
+                formatted_segments.append({
+                    "start": segment.start,
+                    "end": segment.end,
+                    "speaker": "UNKNOWN",
+                    "text": segment.text.strip()
+                })
+        tasks[task_id]["status"] = "complete"
+        tasks[task_id]["message"] = "Processing complete!"
+        tasks[task_id]["segments"] = formatted_segments
+        tasks[task_id]["lang"] = lang
+    except Exception as e:
+        tasks[task_id]["status"] = "error"
+        tasks[task_id]["message"] = f"Error: {str(e)}"
+
+@app.route("/status/<task_id>")
+def status(task_id):
+    task = tasks.get(task_id, {"status": "not_found", "message": "Task not found"})
+    return jsonify(task)
+
+@app.route("/result/<task_id>")
+def result(task_id):
+    task = tasks.get(task_id)
+    if task and task["status"] == "complete":
+        return render_template(
+            "result.html",
+            lang=task["lang"],
+            segments=task["segments"],
+            files={
+                "txt": url_for('download_file', kind='txt', task_id=task_id),
+                "json": url_for('download_file', kind='json', task_id=task_id),
+                "srt": url_for('download_file', kind='srt', task_id=task_id),
+                "vtt": url_for('download_file', kind='vtt', task_id=task_id),
+            },
+            audio_url=url_for('serve_audio', filename=f"upload_{task_id}{suffix}") if KEEP_UPLOADS else None
+        )
+    else:
+        return render_template("index.html", error=task.get("message", "Processing not complete"))
 
 def to_srt(segments):
     lines = []
@@ -196,22 +194,23 @@ def to_vtt(segments):
         lines.append("")
     return "\n".join(lines)
 
-@app.route("/download/<kind>")
-def download_file(kind: str):
-    base = "transcription"
-    if kind not in {"txt", "json", "srt", "vtt"}:
+@app.route("/download/<kind>/<task_id>")
+def download_file(kind: str, task_id: str):
+    task = tasks.get(task_id)
+    if not task or task["status"] != "complete":
         abort(404)
-    path = UPLOAD_DIR / f"{base}.{kind}"
+    base = "transcription"
+    path = UPLOAD_DIR / f"{base}_{task_id}.{kind}"
     if not path.exists():
         abort(404)
     return send_file(str(path), as_attachment=True, download_name=path.name)
 
-@app.route("/audio/<filename>")
-def serve_audio(filename: str):
-    path = UPLOAD_DIR / filename
+@app.route("/audio/<task_id>/<suffix>")
+def serve_audio(task_id: str, suffix: str):
+    path = UPLOAD_DIR / f"upload_{task_id}{suffix}"
     if not path.exists():
         abort(404)
-    return send_file(str(path), mimetype='audio/mpeg' if filename.endswith('.mp3') else 'audio/wav')
+    return send_file(str(path), mimetype='audio/mpeg' if suffix.endswith('.mp3') else 'audio/wav')
 
 if __name__ == "__main__":
     host = os.environ.get("HOST", "0.0.0.0")
